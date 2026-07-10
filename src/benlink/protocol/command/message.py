@@ -168,13 +168,15 @@ def body_disc(m: Message, n: int):
                     out = WriteBSSSettingsReplyBody if m.is_reply else WriteBSSSettingsBody
                 case BasicCommand.EVENT_NOTIFICATION:
                     if m.is_reply:
-                        raise ValueError("EventNotification cannot be a reply")
+                        # Some radios may tag notification-like frames as replies.
+                        # Surface these as opaque bytes instead of crashing parsing.
+                        return bf_bytes(n // 8)
                     out = EventNotificationBody
                 case BasicCommand.REGISTER_NOTIFICATION:
                     if m.is_reply:
-                        raise ValueError(
-                            "RegisterNotification cannot be a reply"
-                        )
+                        # Some radios echo register-notification acknowledgements
+                        # with the reply bit set.
+                        return bf_bytes(n // 8)
                     out = RegisterNotificationBody
                 case BasicCommand.HT_SEND_DATA:
                     out = HTSendDataReplyBody if m.is_reply else HTSendDataBody

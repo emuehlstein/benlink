@@ -87,6 +87,31 @@ To see what else you can do with this library, check out the examples in the
 [benlink.controller](https://benlink.kylehusmann.com/benlink/controller.html)
 module documentation.
 
+## Using As A Serial KISS TNC (macOS/Linux)
+
+You can expose a radio as a virtual serial KISS TNC using the PTY bridge:
+
+```bash
+python -m benlink.examples.kissbridge XX:XX:XX:XX:XX:XX --symlink /tmp/n76-kiss --enable-kiss
+```
+
+The bridge prints the PTY path, and creates a stable symlink if `--symlink` is
+provided. Point your packet software (for example Reticulum) at that serial
+path.
+
+Options:
+
+- `--transport ble|rfcomm` (default: `ble`)
+- `--rfcomm-channel <n>` for RFCOMM transport
+- `--port <n>` for KISS port number (default: `0`)
+- `--channel-id <n>` to tag outbound TNC fragments with a radio channel id
+
+Notes:
+
+- The bridge accepts KISS Data frames (command `0x00`) and ignores other KISS
+      commands.
+- The bridge exits cleanly on `Ctrl+C` and removes the symlink it created.
+
 ## Other Projects
 
 Benlink has already begun to inspire other projects! Here are some that I know

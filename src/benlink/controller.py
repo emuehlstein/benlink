@@ -183,13 +183,29 @@ class _RadioState:
     channels: t.List[Channel]
 
 
+@dataclass
+class _TncRxState:
+    next_fragment_id: int
+    data: bytearray
+
+
+TncDataHandler = t.Callable[[bytes, int | None], None]
+
+
 class RadioController:
     _conn: CommandConnection
     _state: _RadioState | None
+    _tnc_data_handlers: list[TncDataHandler]
+    _tnc_rx_state: dict[int | None, _TncRxState]
+
+    _MAX_TNC_FRAGMENT_SIZE = 50
+    _MAX_TNC_FRAGMENT_ID = 63
 
     def __init__(self, connection: CommandConnection):
         self._conn = connection
         self._state = None
+        self._tnc_data_handlers = []
+        self._tnc_rx_state = {}
 
     @classmethod
     def new_ble(cls, device_uuid: str) -> RadioController:
@@ -294,15 +310,64 @@ class RadioController:
     async def position(self) -> Position:
         return await self._conn.get_position()
 
-    async def send_tnc_data(self, data: bytes) -> None:
-        if len(data) > 50:
-            raise ValueError("Data too long -- TODO: implement fragmentation")
+    async def send_tnc_data(self, data: bytes, channel_id: int | None = None) -> None:
+        max_payload_size = self._MAX_TNC_FRAGMENT_SIZE * (self._MAX_TNC_FRAGMENT_ID + 1)
+        if len(data) > max_payload_size:
+            raise ValueError(
+                f"Data too long: got {len(data)} bytes, max is {max_payload_size}"
+            )
 
-        await self._conn.send_tnc_data_fragment(TncDataFragment(
-            is_final_fragment=True,
-            fragment_id=0,
-            data=data
-        ))
+        if len(data) == 0:
+            chunks = [b""]
+        else:
+            chunks = [
+                data[i:i + self._MAX_TNC_FRAGMENT_SIZE]
+                for i in range(0, len(data), self._MAX_TNC_FRAGMENT_SIZE)
+            ]
+
+        for fragment_id, chunk in enumerate(chunks):
+            await self._conn.send_tnc_data_fragment(TncDataFragment(
+                is_final_fragment=fragment_id == len(chunks) - 1,
+                fragment_id=fragment_id,
+                data=chunk,
+                channel_id=channel_id,
+            ))
+
+    def add_tnc_data_handler(self, handler: TncDataHandler) -> t.Callable[[], None]:
+        self._tnc_data_handlers.append(handler)
+
+        def remove_handler() -> None:
+            self._tnc_data_handlers.remove(handler)
+
+        return remove_handler
+
+    def _on_tnc_fragment(self, fragment: TncDataFragment) -> None:
+        key = fragment.channel_id
+        state = self._tnc_rx_state.get(key)
+
+        if state is None:
+            if fragment.fragment_id != 0:
+                return
+            state = _TncRxState(next_fragment_id=0, data=bytearray())
+            self._tnc_rx_state[key] = state
+
+        if fragment.fragment_id != state.next_fragment_id:
+            if fragment.fragment_id != 0:
+                return
+            state.next_fragment_id = 0
+            state.data.clear()
+
+        state.data.extend(fragment.data)
+        state.next_fragment_id = (fragment.fragment_id + 1) % (self._MAX_TNC_FRAGMENT_ID + 1)
+
+        if not fragment.is_final_fragment:
+            return
+
+        packet = bytes(state.data)
+        del self._tnc_rx_state[key]
+
+        for handler in self._tnc_data_handlers:
+            handler(packet, key)
 
     def add_event_handler(self, handler: EventHandler) -> t.Callable[[], None]:
         return self._conn.add_event_handler(handler)
@@ -359,8 +424,8 @@ class RadioController:
                 self._state.channels[channel.channel_id] = channel
             case SettingsChangedEvent(settings):
                 self._state.settings = settings
-            case TncDataFragmentReceivedEvent():
-                pass
+            case TncDataFragmentReceivedEvent(tnc_data_fragment=tnc_data_fragment):
+                self._on_tnc_fragment(tnc_data_fragment)
             case StatusChangedEvent(status):
                 self._state.status = status
             case UnknownProtocolMessage(message):
@@ -394,6 +459,7 @@ class RadioController:
             raise StateNotInitializedError()
 
         await self._conn.disconnect()
+        self._tnc_rx_state.clear()
         self._state = None
 
 

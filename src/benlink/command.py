@@ -754,13 +754,13 @@ EventType = t.Literal[
     "RESTORE_FACTORY_SETTINGS",
     "HT_CH_CHANGED",
     "HT_SETTINGS_CHANGED",
-    "RINGING_STOPPED"
+    "RINGING_STOPPED",
     "RADIO_STATUS_CHANGED",
     "USER_ACTION",
     "SYSTEM_EVENT",
     "BSS_SETTINGS_CHANGED",
     "DATA_TXD",
-    "POSITION_CHANGED"
+    "POSITION_CHANGE"
 ]
 
 RadioMessage = ReplyMessage | EventMessage
