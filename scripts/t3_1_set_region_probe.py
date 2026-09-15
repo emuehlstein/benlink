@@ -22,6 +22,7 @@ We log every UnknownProtocolMessage we see during the probe so if
 SET_REGION emits a reply we can capture its shape.
 """
 import asyncio
+import os
 import time
 from bleak import BleakScanner
 import benlink.controller as bc
@@ -34,7 +35,10 @@ from _teelog import setup_teelog
 
 setup_teelog(__file__)
 
-KNOWN_UUID = "377F7AC2-2AA3-D0F4-8DDC-D89A4C3594C6"
+# NOTE: CoreBluetooth peripheral UUIDs are per-host AND change whenever the
+# device is unpaired/re-paired, so a hardcoded one goes stale silently. Match
+# on the advertised name and let BENLINK_N76_ADDR override when needed.
+KNOWN_UUID = os.environ.get("BENLINK_N76_ADDR", "")
 CHANNELS_TO_SAMPLE = list(range(32))
 
 
@@ -42,7 +46,7 @@ async def find_radio(timeout: float = 12.0) -> str:
     print(f"scanning {timeout}s...")
     devices = await BleakScanner.discover(timeout=timeout)
     for d in devices:
-        if d.address.upper() == KNOWN_UUID.upper():
+        if KNOWN_UUID and d.address.upper() == KNOWN_UUID.upper():
             return d.address
         if d.name and "VR-N76" in d.name.upper():
             return d.address
