@@ -150,6 +150,17 @@ def channel_from_spec(spec: dict) -> Channel:
         raise PlanError(f"slot {slot}: power must be high, med or low, got {power!r}")
 
     modulation = str(spec.get("modulation", "FM")).upper()
+    tx_disable = bool(spec.get("tx_disable", False))
+    if modulation == "AM" and not tx_disable:
+        # No amateur (Part 97) transmit authority on aviation frequencies.
+        # codeplugger's exporter already refuses to emit this, but the plan
+        # format is meant to be hand-writable too, so the same rule is
+        # enforced here rather than trusted to whoever wrote the JSON.
+        raise PlanError(
+            f"slot {slot} ({name or '(unnamed)'}): AM channel must set "
+            "tx_disable: true — no transmit authority on airband from an "
+            "amateur station"
+        )
 
     return Channel(
         channel_id=slot - 1,
@@ -166,7 +177,7 @@ def channel_from_spec(spec: dict) -> Channel:
         pre_de_emph_bypass=False,
         sign=False,
         tx_at_med_power=(power == "med"),
-        tx_disable=bool(spec.get("tx_disable", False)),
+        tx_disable=tx_disable,
         fixed_freq=False,
         fixed_bandwidth=False,
         fixed_tx_power=False,
@@ -421,7 +432,12 @@ def print_plan(plan: dict, writes: dict[int, dict[int, Channel]]) -> None:
             if not ch.name and ch.rx_freq == 0.0:
                 continue
             power = "H" if ch.tx_at_max_power else ("M" if ch.tx_at_med_power else "L")
-            print(f"  slot {slot:>2}: {ch.name:<10} rx={ch.rx_freq:>9.4f} tx={ch.tx_freq:>9.4f} "
+            # Modulation is easy to miss if it's buried at the end of a long
+            # line, and an AM channel that silently prints as FM is exactly
+            # the kind of review gap that lets a bad plan through -- so a
+            # non-FM mode gets its own loud marker up front instead.
+            mod_marker = f"[{ch.tx_mod}] " if ch.tx_mod != "FM" else ""
+            print(f"  slot {slot:>2}: {mod_marker}{ch.name:<10} rx={ch.rx_freq:>9.4f} tx={ch.tx_freq:>9.4f} "
                   f"{ch.bandwidth:<6} tone={_tone_repr(ch.tx_sub_audio):<6} "
                   f"pwr={power} scan={int(ch.scan)} txdis={int(ch.tx_disable)} mute={int(ch.mute)}")
         if blanks:
