@@ -346,14 +346,34 @@ def channel_diff(want: Channel, got: Channel) -> list[str]:
     return out
 
 
+async def refresh_region(radio, r_idx: int) -> None:
+    """Point the radio at ``r_idx`` and make sure the channel cache is fresh.
+
+    ``radio.channels`` is hydrated once at connect for whatever region the
+    radio was sitting on, and re-hydrated on each region change. Skipping the
+    change because the radio is *already* on the target region therefore
+    leaves the connect-time snapshot in place -- which, after writing, is the
+    pre-write contents. Verifying against it reports every slot in that one
+    region as a failure while the radio actually holds the new values.
+
+    Hopping to a neighbouring region and back forces the re-read. It costs two
+    region changes, and only for the region that happens to be selected.
+    """
+    if radio.status.curr_region == r_idx:
+        neighbour = (r_idx + 1) % len(radio.region_names)
+        if neighbour == r_idx:  # single-region radio; nothing to bounce off
+            return
+        await radio.set_region(neighbour)
+    await radio.set_region(r_idx)
+
+
 async def verify_writes(radio, writes: dict[int, dict[int, Channel]],
                         names: dict[int, str]) -> int:
     """Re-read written slots and report mismatches. Returns mismatch count."""
     saved = radio.status.curr_region
     bad = 0
     for r_idx in sorted(writes):
-        if r_idx != radio.status.curr_region:
-            await radio.set_region(r_idx)
+        await refresh_region(radio, r_idx)
         want_name = names.get(r_idx)
         if want_name is not None and radio.region_names[r_idx] != want_name:
             print(f"  MISMATCH region {r_idx} name: want {want_name!r}, got {radio.region_names[r_idx]!r}")
@@ -370,6 +390,12 @@ async def verify_writes(radio, writes: dict[int, dict[int, Channel]],
     if radio.status.curr_region != saved:
         await radio.set_region(saved)
     return bad
+
+
+# Note for the backup path: read_all_regions deliberately does *not* use
+# refresh_region. It runs before any write, so the connect-time hydration of
+# the current region is still accurate, and bouncing regions there would only
+# add round trips to the slowest part of the run.
 
 
 # ---------------------------------------------------------------------------
